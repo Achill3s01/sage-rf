@@ -1,19 +1,21 @@
-
 function filter_designer()
 
 clc;
 
-%% SAGE-RF FILTER DESIGNER - GUI VERSION
+%% SAGE-RF FILTER DESIGNER
 
 % Application state
 x = [];
 y = [];
 Fs = [];
 fileName = '';
+
 filterType = 'Low-Pass';
-designType = 'FIR';
+designType = 'FIR - Window Method';
+
 b = [];
 a = [];
+
 filterOrder = 100;
 fc1 = 1000;
 fc2 = 3000;
@@ -25,15 +27,14 @@ fig = uifigure( ...
     'Position', [100 80 1150 760], ...
     'Color', [0.10 0.11 0.14]);
 
-% Header
-header = uilabel(fig, ...
+uilabel(fig, ...
     'Text', 'SAGE-RF  |  DIGITAL FILTER DESIGNER', ...
     'Position', [30 710 1000 35], ...
     'FontSize', 22, ...
     'FontWeight', 'bold', ...
     'FontColor', [0.2 0.7 1]);
 
-subtitle = uilabel(fig, ...
+uilabel(fig, ...
     'Text', 'Audio filtering and frequency-response analysis', ...
     'Position', [32 685 900 22], ...
     'FontSize', 12, ...
@@ -187,7 +188,7 @@ cutoff1Field = uieditfield(p3, 'numeric', ...
     'Position', [45 375 250 40], ...
     'Value', 1000);
 
-uilabel(p3, ...
+upperLabel = uilabel(p3, ...
     'Text', 'Upper Cutoff Frequency (Hz)', ...
     'Position', [45 315 350 25], ...
     'FontColor', 'white');
@@ -323,7 +324,7 @@ showPage(1);
 
     function loadAudio(~,~)
 
-        [file, path] = uigetfile( ...
+        [file,path] = uigetfile( ...
             {'*.wav', 'WAV Audio Files (*.wav)'}, ...
             'Select Audio File');
 
@@ -333,23 +334,45 @@ showPage(1);
 
         try
 
-            [newAudio, newFs] = audioread(fullfile(path,file));
+            [newAudio,newFs] = audioread(fullfile(path,file));
+
+            % Validate loaded audio
+
+            if isempty(newAudio) || size(newAudio,1) < 2
+                error('The selected audio file is empty or too short.');
+            end
+
+            if ~isfinite(newFs) || newFs <= 0
+                error('Invalid sampling frequency in audio file.');
+            end
+
+            if any(~isfinite(newAudio(:)))
+                error('Audio contains invalid numerical values.');
+            end
+
+            % Update application state only after successful loading
 
             x = newAudio;
             Fs = newFs;
             fileName = file;
 
-            fileLabel.Text = sprintf( ...
-                '%s  |  %.2f seconds  |  %d Hz', ...
-                file, length(x)/Fs, Fs);
+            % Clear previous filtered output
 
-            fprintf('\nLoaded: %s\n', file);
-            fprintf('Sampling Frequency: %d Hz\n', Fs);
-            fprintf('Duration: %.2f seconds\n', length(x)/Fs);
+            y = [];
+            b = [];
+            a = [];
+
+            fileLabel.Text = sprintf( ...
+                '%s  |  %.2f seconds  |  %g Hz', ...
+                file, size(x,1)/Fs, Fs);
+
+            fprintf('\nLoaded: %s\n',file);
+            fprintf('Sampling Frequency: %g Hz\n',Fs);
+            fprintf('Duration: %.2f seconds\n',size(x,1)/Fs);
 
         catch ME
 
-            uialert(fig, ME.message, 'Audio Loading Error');
+            uialert(fig,ME.message,'Audio Loading Error');
 
         end
 
@@ -369,15 +392,17 @@ showPage(1);
 
         designType = designDropdown.Value;
 
-        if strcmp(designType, 'FIR - Window Method')
+        if strcmp(designType,'FIR - Window Method')
 
             orderField.Enable = 'on';
+
             configInfo.Text = ...
                 'FIR order controls the number of filter coefficients.';
 
         else
 
             orderField.Enable = 'off';
+
             configInfo.Text = ...
                 'IIR uses a fixed second-order biquad design.';
 
@@ -393,7 +418,8 @@ showPage(1);
 
         if isempty(x)
 
-            uialert(fig, 'Please load an audio file first.', ...
+            uialert(fig, ...
+                'Please load an audio file first.', ...
                 'Missing Audio');
 
             return;
@@ -422,19 +448,11 @@ showPage(1);
            strcmp(filterType,'High-Pass')
 
             cutoff2Field.Visible = 'off';
-
-            upperLabel = findobj(p3, ...
-                'Text', 'Upper Cutoff Frequency (Hz)');
-
             upperLabel.Visible = 'off';
 
         else
 
             cutoff2Field.Visible = 'on';
-
-            upperLabel = findobj(p3, ...
-                'Text', 'Upper Cutoff Frequency (Hz)');
-
             upperLabel.Visible = 'on';
 
         end
@@ -461,23 +479,34 @@ showPage(1);
             return;
         end
 
+        % Always read the current GUI selections
+
+        filterType = filterDropdown.Value;
+        designType = designDropdown.Value;
+
         fc1 = cutoff1Field.Value;
         fc2 = cutoff2Field.Value;
 
-        if ~isfinite(fc1) || fc1 <= 0 || fc1 >= Fs/2
+        % Validate first cutoff
+
+        if ~isscalar(fc1) || ~isfinite(fc1) || ...
+                fc1 <= 0 || fc1 >= Fs/2
 
             uialert(fig, ...
-                'Cutoff frequency must be between 0 and Nyquist frequency.', ...
+                'Cutoff frequency must be greater than zero and below Nyquist frequency.', ...
                 'Invalid Frequency');
 
             return;
 
         end
 
+        % Validate second cutoff for band filters
+
         if strcmp(filterType,'Band-Pass') || ...
            strcmp(filterType,'Band-Stop')
 
-            if ~isfinite(fc2) || fc2 <= fc1 || fc2 >= Fs/2
+            if ~isscalar(fc2) || ~isfinite(fc2) || ...
+                    fc2 <= fc1 || fc2 >= Fs/2
 
                 uialert(fig, ...
                     'Upper cutoff must be greater than lower cutoff and below Nyquist.', ...
@@ -489,6 +518,8 @@ showPage(1);
 
         end
 
+        % Design and apply filter
+
         statusLabel.Text = 'Designing and applying filter...';
 
         drawnow;
@@ -499,7 +530,8 @@ showPage(1);
 
                 filterOrder = orderField.Value;
 
-                if ~isfinite(filterOrder) || ...
+                if ~isscalar(filterOrder) || ...
+                   ~isfinite(filterOrder) || ...
                    filterOrder < 2 || ...
                    filterOrder > 2000 || ...
                    filterOrder ~= floor(filterOrder)
@@ -513,26 +545,42 @@ showPage(1);
 
                 end
 
+                % Even order gives an integer linear-phase group delay
+
                 if rem(filterOrder,2) ~= 0
                     filterOrder = filterOrder + 1;
                 end
 
-                [b,a] = designFIR(filterType,Fs, ...
-                    fc1,fc2,filterOrder);
+                [newB,newA] = designFIR( ...
+                    filterType,Fs,fc1,fc2,filterOrder);
 
             else
 
                 filterOrder = 2;
 
-                [b,a] = designIIR(filterType,Fs,fc1,fc2);
+                [newB,newA] = designIIR( ...
+                    filterType,Fs,fc1,fc2);
 
             end
 
-            % Apply filter to every audio channel
+            % Apply the filter independently to every channel
 
-            y = filter(b,a,x);
+            newY = filter(newB,newA,x);
 
-            % Plot frequency response
+            if any(~isfinite(newY(:)))
+                error('Filtering produced invalid numerical values.');
+            end
+
+            % Store the successful result
+
+            b = newB;
+            a = newA;
+            y = newY;
+
+            %% FREQUENCY RESPONSE
+
+            % Frequency samples are used for plotting resolution,
+            % not assumptions about the input audio.
 
             w = linspace(0,pi,4096);
 
@@ -558,31 +606,26 @@ showPage(1);
 
             grid(axResponse,'on');
 
-            % Convert stereo to mono for waveform display
+            %% WAVEFORM DISPLAY
+
+            % Convert multichannel audio to mono for visualization.
+            % The actual filtering and RMS calculations use all channels.
 
             originalMono = mean(x,2);
             filteredMono = mean(y,2);
 
-            % Find where actual audio starts
+            % Display an initial segment of the recording.
+            % This is only a visualization window; the entire signal
+            % has already been filtered.
 
-            envelope = max(abs(x),[],2);
+            numberOfSamples = size(x,1);
 
-            threshold = 0.01*max(envelope);
+            displaySamples = min( ...
+                numberOfSamples,round(0.5*Fs));
 
-            firstActive = find(envelope > threshold,1,'first');
+            indices = 1:displaySamples;
 
-            if isempty(firstActive)
-                firstActive = 1;
-            end
-
-            startIndex = firstActive;
-
-            endIndex = min(length(x), ...
-                startIndex + round(0.5*Fs)-1);
-
-            indices = startIndex:endIndex;
-
-            time = (indices-startIndex)/Fs;
+            time = (indices-1)/Fs;
 
             % Original waveform
 
@@ -604,16 +647,31 @@ showPage(1);
             plot(axFiltered,time,filteredMono(indices), ...
                 'LineWidth',1);
 
-            title(axFiltered,'Filtered Audio');
+            if strcmp(designType,'FIR - Window Method')
+
+                title(axFiltered, ...
+                    'Filtered Audio (FIR group delay included)');
+
+            else
+
+                title(axFiltered,'Filtered Audio');
+
+            end
+
             xlabel(axFiltered,'Time (seconds)');
             ylabel(axFiltered,'Amplitude');
 
             grid(axFiltered,'on');
 
-            % Measurements
+            %% RMS MEASUREMENTS
+
+            % Aggregate RMS across all samples and channels
 
             originalRMS = sqrt(mean(x(:).^2));
+
             filteredRMS = sqrt(mean(y(:).^2));
+
+            %% TERMINAL OUTPUT
 
             fprintf('\n===== FILTER RESULTS =====\n');
 
@@ -623,6 +681,8 @@ showPage(1);
             fprintf('Filter Order: %d\n',filterOrder);
             fprintf('Original RMS: %.6f\n',originalRMS);
             fprintf('Filtered RMS: %.6f\n',filteredRMS);
+
+            fprintf('================================\n');
 
             statusLabel.Text = 'Filter applied successfully.';
 
@@ -645,7 +705,12 @@ showPage(1);
     function playOriginal(~,~)
 
         if ~isempty(x)
-            soundsc(x,Fs);
+
+            % sound preserves the signal's original amplitude.
+            % Unlike soundsc, it does not independently normalize it.
+
+            sound(x,Fs);
+
         end
 
     end
@@ -653,7 +718,9 @@ showPage(1);
     function playFiltered(~,~)
 
         if ~isempty(y)
-            soundsc(y,Fs);
+
+            sound(y,Fs);
+
         end
 
     end
@@ -679,14 +746,20 @@ showPage(1);
 
         try
 
-            % Prevent clipping when exporting
-
             outputAudio = y;
+
+            % WAV export requires values within [-1,1].
+            % Scale the entire output only if clipping would occur.
 
             peak = max(abs(outputAudio(:)));
 
             if peak > 1
+
                 outputAudio = outputAudio/peak;
+
+                fprintf(['\nExport warning: Output exceeded the ' ...
+                         'WAV amplitude range and was scaled.\n']);
+
             end
 
             audiowrite(fullfile(path,file),outputAudio,Fs);
@@ -712,11 +785,30 @@ end
 
 function [b,a] = designFIR(type,Fs,f1,f2,order)
 
+% Validate filter order
+
+if ~isscalar(order) || ~isfinite(order) || ...
+        order < 2 || order ~= floor(order)
+
+    error('FIR order must be an integer greater than or equal to 2.');
+
+end
+
+% The implementation uses an even order
+
+if rem(order,2) ~= 0
+    error('FIR filter order must be even.');
+end
+
 M = order;
 
 m = (-M/2:M/2)';
 
+% Hamming window
+
 window = 0.54 - 0.46*cos(2*pi*(0:M)'/M);
+
+% Low-pass impulse response at the lower cutoff
 
 lp1 = lowpassImpulse(f1,Fs,m);
 
@@ -744,25 +836,38 @@ switch type
 
         h = delta-(lp2-lp1);
 
+    otherwise
+
+        error('Unsupported FIR filter type.');
+
 end
+
+% Apply window
 
 h = h.*window;
 
 b = h(:)';
 a = 1;
 
-% Normalize passband gain
+%% Normalize passband gain
 
 switch type
 
     case {'Low-Pass','Band-Stop'}
+
         referenceFrequency = 0;
 
     case 'High-Pass'
+
         referenceFrequency = Fs/2;
 
     case 'Band-Pass'
+
         referenceFrequency = sqrt(f1*f2);
+
+    otherwise
+
+        error('Unsupported FIR filter type.');
 
 end
 
@@ -770,9 +875,13 @@ omega = 2*pi*referenceFrequency/Fs;
 
 gain = abs(sum(b.*exp(-1i*(0:M)*omega)));
 
-if gain > 1e-12
-    b = b/gain;
+if ~isfinite(gain) || gain < 1e-12
+
+    error('FIR normalization failed. Check the cutoff frequencies and order.');
+
 end
+
+b = b/gain;
 
 end
 
@@ -813,62 +922,147 @@ end
 
 function [b,a] = designIIR(type,Fs,f1,f2)
 
+%% INPUT VALIDATION
+
+if ~isscalar(Fs) || ~isfinite(Fs) || Fs <= 0
+
+    error('Sampling frequency must be a positive finite scalar.');
+
+end
+
+if ~ismember(type, ...
+        {'Low-Pass','High-Pass','Band-Pass','Band-Stop'})
+
+    error('Unsupported IIR filter type.');
+
+end
+
+if ~isscalar(f1) || ~isfinite(f1) || f1 <= 0 || f1 >= Fs/2
+
+    error('Cutoff frequency must be between 0 and Nyquist.');
+
+end
+
+if strcmp(type,'Band-Pass') || strcmp(type,'Band-Stop')
+
+    if ~isscalar(f2) || ~isfinite(f2) || ...
+            f2 <= f1 || f2 >= Fs/2
+
+        error(['Upper cutoff must be greater than lower cutoff ' ...
+               'and below Nyquist.']);
+
+    end
+
+end
+
+%% LOW-PASS AND HIGH-PASS
+% Second-order Butterworth response
+
 if strcmp(type,'Low-Pass') || strcmp(type,'High-Pass')
 
     fc = f1;
 
     Q = 1/sqrt(2);
 
+    w0 = 2*pi*fc/Fs;
+
+    alpha = sin(w0)/(2*Q);
+
+    c = cos(w0);
+
+    switch type
+
+        case 'Low-Pass'
+
+            b0 = (1-c)/2;
+            b1 = 1-c;
+            b2 = (1-c)/2;
+
+        case 'High-Pass'
+
+            b0 = (1+c)/2;
+            b1 = -(1+c);
+            b2 = (1+c)/2;
+
+    end
+
+    a0 = 1+alpha;
+
+    a1 = -2*c;
+    a2 = 1-alpha;
+
+    b = [b0 b1 b2]/a0;
+
+    a = [1 a1/a0 a2/a0];
+
+
+%% BAND-PASS AND BAND-STOP
+% Prewarped analog prototype + bilinear transform
+
 else
 
-    fc = sqrt(f1*f2);
+    % Prewarp digital cutoff frequencies.
+    % Bilinear transform:
+    % s = 2*(1-z^-1)/(1+z^-1)
 
-    Q = fc/(f2-f1);
+    Omega1 = 2*tan(pi*f1/Fs);
+
+    Omega2 = 2*tan(pi*f2/Fs);
+
+    % Analog centre frequency and bandwidth
+
+    Omega0 = sqrt(Omega1*Omega2);
+
+    B = Omega2-Omega1;
+
+    % Denominator coefficients
+
+    d0 = 4 + 2*B + Omega0^2;
+
+    d1 = -8 + 2*Omega0^2;
+
+    d2 = 4 - 2*B + Omega0^2;
+
+    switch type
+
+        case 'Band-Pass'
+
+            % H(s) = B*s / (s^2 + B*s + Omega0^2)
+
+            b0 = 2*B;
+            b1 = 0;
+            b2 = -2*B;
+
+        case 'Band-Stop'
+
+            % H(s) = (s^2 + Omega0^2) ...
+            %        / (s^2 + B*s + Omega0^2)
+
+            b0 = 4 + Omega0^2;
+
+            b1 = -8 + 2*Omega0^2;
+
+            b2 = 4 + Omega0^2;
+
+    end
+
+    % Normalize coefficients
+
+    b = [b0 b1 b2]/d0;
+
+    a = [1 d1/d0 d2/d0];
 
 end
 
-w0 = 2*pi*fc/Fs;
+%% IIR STABILITY CHECK
 
-alpha = sin(w0)/(2*Q);
+poles = roots(a);
 
-c = cos(w0);
+if any(abs(poles) >= 1)
 
-switch type
-
-    case 'Low-Pass'
-
-        b0 = (1-c)/2;
-        b1 = 1-c;
-        b2 = (1-c)/2;
-
-    case 'High-Pass'
-
-        b0 = (1+c)/2;
-        b1 = -(1+c);
-        b2 = (1+c)/2;
-
-    case 'Band-Pass'
-
-        b0 = alpha;
-        b1 = 0;
-        b2 = -alpha;
-
-    case 'Band-Stop'
-
-        b0 = 1;
-        b1 = -2*c;
-        b2 = 1;
+    error('Designed IIR filter is unstable.');
 
 end
-
-a0 = 1+alpha;
-
-a1 = -2*c;
-a2 = 1-alpha;
-
-b = [b0 b1 b2]/a0;
-
-a = [1 a1/a0 a2/a0];
 
 end
 
@@ -878,6 +1072,14 @@ end
 % ==========================================================
 
 function H = evaluateResponse(b,a,w)
+
+% Ensure row-vector coefficients
+
+b = b(:).';
+
+a = a(:).';
+
+% Calculate numerator and denominator
 
 numerator = zeros(size(w));
 
@@ -896,6 +1098,8 @@ for k = 1:length(a)
         a(k)*exp(-1i*(k-1)*w);
 
 end
+
+% Frequency response
 
 H = numerator./denominator;
 
