@@ -1,4 +1,3 @@
-
 function main()
 % SAGE-RF LITE
 % Unified Digital Signal Processing Workstation
@@ -6,11 +5,11 @@ function main()
 % Integrated modules:
 %   1. Signal Viewer
 %   2. FFT Analyzer
-%   3. Spectrogram Analyzer (placeholder)
-%   4. Filter Designer (placeholder)
-%   5. Speech Enhancement (placeholder)
+%   3. Spectrogram Analyzer
+%   4. Filter Designer
+%   5. Speech Enhancement (next integration)
 %
-% Shared audio loading and playback stop control.
+% Shared audio loading across all integrated modules.
 
     %% PROJECT SETUP
 
@@ -36,6 +35,9 @@ function main()
 
     app.signalViewerRefresh = [];
     app.fftAnalyzerRefresh = [];
+    app.spectrogramRefresh = [];
+    app.filterDesignerRefresh = [];
+    app.speechEnhancementRefresh = [];
 
     %% COLORS
 
@@ -389,31 +391,110 @@ function main()
 
     end
 
-    %% OTHER MODULE PLACEHOLDERS
+    %% SPECTROGRAM INTEGRATION
 
-    buildPlaceholder( ...
-        app.modulePanels.spectrogram, ...
-        'Spectrogram Analyzer', ...
-        'Inspect frequency content over time.', ...
-        'Time-frequency visualization with adjustable window and overlap.');
+    spectrogramFile = fullfile( ...
+        modulesFolder, 'create_spectrogram_analyzer.m');
 
-    buildPlaceholder( ...
-        app.modulePanels.filter_designer, ...
-        'Filter Designer', ...
-        'Design and apply FIR or IIR filters.', ...
-        'Existing Filter Designer will be embedded here.');
+    if isfile(spectrogramFile)
 
-    buildPlaceholder( ...
-        app.modulePanels.speech_enhancement, ...
-        'Speech Enhancement', ...
-        'Reduce stationary background noise.', ...
-        'Existing spectral-subtraction implementation will be embedded here.');
+        try
+
+            app.spectrogramRefresh = create_spectrogram_analyzer( ...
+                app.modulePanels.spectrogram, ...
+                @getAudioData);
+
+        catch ME
+
+            warning('SAGE:Spectrogram', ...
+                'Spectrogram could not be initialized: %s', ...
+                ME.message);
+
+            buildPlaceholder( ...
+                app.modulePanels.spectrogram, ...
+                'Spectrogram Analyzer', ...
+                'Spectrogram initialization failed.', ...
+                ME.message);
+
+        end
+
+    else
+
+        buildPlaceholder( ...
+            app.modulePanels.spectrogram, ...
+            'Spectrogram Analyzer', ...
+            'Inspect frequency content over time.', ...
+            'Missing modules/create_spectrogram_analyzer.m');
+
+    end
+
+    %% FILTER DESIGNER INTEGRATION
+
+    filterDesignerFile = fullfile( ...
+        modulesFolder, 'create_filter_designer.m');
+
+    if isfile(filterDesignerFile)
+
+        try
+
+            app.filterDesignerRefresh = create_filter_designer( ...
+                app.modulePanels.filter_designer, ...
+                @getAudioData);
+
+        catch ME
+
+            warning('SAGE:FilterDesigner', ...
+                'Filter Designer could not be initialized: %s', ...
+                ME.message);
+
+            buildPlaceholder( ...
+                app.modulePanels.filter_designer, ...
+                'Filter Designer', ...
+                'Filter Designer initialization failed.', ...
+                ME.message);
+
+        end
+
+    else
+
+        buildPlaceholder( ...
+            app.modulePanels.filter_designer, ...
+            'Filter Designer', ...
+            'Design and apply FIR or IIR filters.', ...
+            'Missing modules/create_filter_designer.m');
+
+    end
+
+    %% SPEECH ENHANCEMENT INTEGRATION
+
+    speechEnhancementFile = fullfile( ...
+        modulesFolder, 'create_speech_enhancement.m');
+
+    if isfile(speechEnhancementFile)
+        try
+            app.speechEnhancementRefresh = create_speech_enhancement( ...
+                app.modulePanels.speech_enhancement, @getAudioData);
+        catch ME
+            warning('SAGE:SpeechEnhancement', ...
+                'Speech Enhancement could not be initialized: %s', ME.message);
+            buildPlaceholder(app.modulePanels.speech_enhancement, ...
+                'Speech Enhancement', ...
+                'Reduce stationary background noise.', ME.message);
+        end
+    else
+        buildPlaceholder(app.modulePanels.speech_enhancement, ...
+            'Speech Enhancement', ...
+            'Reduce stationary background noise.', ...
+            'Missing modules/create_speech_enhancement.m');
+    end
 
     %% INITIAL NAVIGATION
 
     navigate('Dashboard');
 
-    %% NAVIGATION FUNCTION
+    %% =========================================================
+    % NAVIGATION FUNCTION
+    % ==========================================================
 
     function navigate(moduleName)
 
@@ -422,6 +503,7 @@ function main()
         app.currentModule = moduleName;
 
         % Hide all workspaces.
+
         panelKeys = fieldnames(app.modulePanels);
 
         for j = 1:numel(panelKeys)
@@ -429,11 +511,13 @@ function main()
         end
 
         % Show selected workspace.
+
         app.modulePanels.(key).Visible = 'on';
 
         app.pageTitle.Text = moduleName;
 
         % Update sidebar appearance.
+
         buttonKeys = fieldnames(app.moduleButtons);
 
         for j = 1:numel(buttonKeys)
@@ -448,25 +532,37 @@ function main()
 
         app.moduleButtons.(key).FontColor = [1 1 1];
 
-        % Refresh Signal Viewer when opened.
-        if strcmp(key, 'signal_viewer') && ...
-                isa(app.signalViewerRefresh, 'function_handle')
+        % Refresh selected module.
 
-            app.signalViewerRefresh();
+        switch key
 
-        end
+            case 'signal_viewer'
 
-        % Refresh FFT Analyzer when opened.
-        if strcmp(key, 'fft_analyzer') && ...
-                isa(app.fftAnalyzerRefresh, 'function_handle')
+                refreshIfAvailable(app.signalViewerRefresh);
 
-            app.fftAnalyzerRefresh();
+            case 'fft_analyzer'
+
+                refreshIfAvailable(app.fftAnalyzerRefresh);
+
+            case 'spectrogram'
+
+                refreshIfAvailable(app.spectrogramRefresh);
+
+            case 'filter_designer'
+
+                refreshIfAvailable(app.filterDesignerRefresh);
+
+            case 'speech_enhancement'
+
+                refreshIfAvailable(app.speechEnhancementRefresh);
 
         end
 
     end
 
-    %% LOAD AUDIO FUNCTION
+    %% =========================================================
+    % LOAD AUDIO FUNCTION
+    % ==========================================================
 
     function loadAudio()
 
@@ -498,10 +594,12 @@ function main()
 
             end
 
-            % Stop previous playback before replacing audio.
+            % Stop previous playback.
+
             stopAudio();
 
             % Store shared audio.
+
             app.audio = x;
             app.fs = fs;
             app.fileName = file;
@@ -509,6 +607,7 @@ function main()
             duration = size(x, 1) / fs;
 
             % Update toolbar.
+
             app.fileInfo.Text = sprintf( ...
                 '%s  |  %.2f s  |  %d channel(s)', ...
                 file, duration, size(x, 2));
@@ -516,17 +615,20 @@ function main()
             app.sampleRateLabel.Text = sprintf('Fs: %g Hz', fs);
 
             % Update dashboard.
+
             updateDashboardAudioInfo();
 
-            % Refresh Signal Viewer.
-            if isa(app.signalViewerRefresh, 'function_handle')
-                app.signalViewerRefresh();
-            end
+            % Refresh integrated modules.
 
-            % Refresh FFT Analyzer.
-            if isa(app.fftAnalyzerRefresh, 'function_handle')
-                app.fftAnalyzerRefresh();
-            end
+            refreshIfAvailable(app.signalViewerRefresh);
+
+            refreshIfAvailable(app.fftAnalyzerRefresh);
+
+            refreshIfAvailable(app.spectrogramRefresh);
+
+            refreshIfAvailable(app.filterDesignerRefresh);
+
+            refreshIfAvailable(app.speechEnhancementRefresh);
 
         catch ME
 
@@ -539,13 +641,16 @@ function main()
 
     end
 
-    %% STOP AUDIO FUNCTION
+    %% =========================================================
+    % STOP AUDIO FUNCTION
+    % ==========================================================
 
     function stopAudio()
 
         try
 
-            % Stop playback started with MATLAB sound().
+            % Stop MATLAB sound() playback.
+
             clear sound;
 
             drawnow;
@@ -559,7 +664,9 @@ function main()
 
     end
 
-    %% SHARED AUDIO GETTER
+    %% =========================================================
+    % SHARED AUDIO GETTER
+    % ==========================================================
 
     function [x, fs, fileName] = getAudioData()
 
@@ -569,7 +676,32 @@ function main()
 
     end
 
-    %% DASHBOARD AUDIO UPDATE
+    %% =========================================================
+    % MODULE REFRESH HELPER
+    % ==========================================================
+
+    function refreshIfAvailable(refreshFcn)
+
+        if isa(refreshFcn, 'function_handle')
+
+            try
+
+                refreshFcn();
+
+            catch ME
+
+                warning('SAGE:ModuleRefresh', ...
+                    'Module refresh failed: %s', ME.message);
+
+            end
+
+        end
+
+    end
+
+    %% =========================================================
+    % DASHBOARD AUDIO UPDATE
+    % ==========================================================
 
     function updateDashboardAudioInfo()
 
@@ -595,7 +727,9 @@ function main()
 
     end
 
-    %% DASHBOARD
+    %% =========================================================
+    % DASHBOARD
+    % ==========================================================
 
     function buildDashboard(parent)
 
@@ -610,6 +744,7 @@ function main()
         g.BackgroundColor = C.bg;
 
         % Welcome panel.
+
         welcome = uipanel(g, ...
             'BorderType', 'none', ...
             'BackgroundColor', [0.075 0.12 0.18]);
@@ -640,6 +775,7 @@ function main()
             'BackgroundColor', [0.075 0.12 0.18]);
 
         % Audio information card.
+
         audioCard = uipanel(g, ...
             'Title', ' CURRENT AUDIO', ...
             'FontSize', 9, ...
@@ -674,6 +810,7 @@ function main()
             'BackgroundColor', C.toolbar);
 
         % Module cards.
+
         moduleCard = uipanel(g, ...
             'Title', ' DSP MODULES', ...
             'FontSize', 9, ...
@@ -725,6 +862,7 @@ function main()
         end
 
         % Dashboard tip.
+
         note = uilabel(g, ...
             'Text', 'TIP  |  Load audio once; integrated modules can access the shared signal.', ...
             'FontSize', 9, ...
@@ -735,7 +873,9 @@ function main()
 
     end
 
-    %% PLACEHOLDER WORKSPACE
+    %% =========================================================
+    % PLACEHOLDER WORKSPACE
+    % ==========================================================
 
     function buildPlaceholder(parent, heading, subtitle, detail)
 
@@ -810,7 +950,10 @@ function main()
 
 end
 
-%% MODULE NAME TO STRUCT KEY
+
+%% =========================================================
+% MODULE NAME TO STRUCT KEY
+% ==========================================================
 
 function key = moduleKey(moduleName)
 
